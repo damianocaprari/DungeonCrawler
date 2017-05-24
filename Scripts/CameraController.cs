@@ -11,58 +11,66 @@ using UnityEngine;
 
 public class CameraController : MonoBehaviour
 {
-    public bool useMouseToMove = false;
+    [Header("Camera Movement Settings")]
     public float cameraSpeed = 8.5f;
-    public float cameraMaxZoom = 10;
-    public float cameraMinZoom = 5;
-    public float cameraZoomSpeed = 0.5f;
-    float cameraCurrentZoom = 10;
+    public bool useMouseToMove = false;
     public int pixelsBeforeBorder = 4;
-    public int pixelsBeyongBorder = 100;
+    public int pixelsBeyondBorder = 100;
+    private float speedScale;
 
-    Vector3 cameraDirection = Vector3.zero;
+    [Header("Camera Zoom Settings")]
+    public List<float> cameraZooms = new List<float>();
+    public float cameraZoomSpeed = 0.5f;
+    private int currentCameraZoomIndex = 0;
+    private int cameraZoomDirection; //0: Still | 1: Zoom-in | -1: Zoom-out
+    private float currentCameraZoom = 0;
+    private Vector3 cameraDirection = Vector3.zero;
+    private float cameraHalfWidth;
+    private float cameraHalfHeight;
 
-    public Vector2 extraBorder = new Vector2(3, 2);
-    float mapBottomBorder;
-    float mapTopBorder;
-    float mapLeftBorder;
-    float mapRightBorder;
+    [Header("Camera Border Settings")]
+    [Tooltip("Extra space (in squares) left around the map.\nClockwise, Starting from Top.")]
+    public Vector4 extraBorder = new Vector4(2, 5, 2, 3);
+    private float mapBottomBorder;
+    private float mapTopBorder;
+    private float mapLeftBorder;
+    private float mapRightBorder;
 
-    float cameraHalfWidth;
-    float cameraHalfHeight;
-
-    public float speedScale;
-
-
-    // Use this for initialization
     void Start()
     {
         ResetCameraBorders(10, 10);
+        cameraZooms.Sort();
+        currentCameraZoom = cameraZooms[0];
         UpdateCameraZoom();
+
     }
 
-    // Update is called once per frame
     void Update()
     {
-        if (!(Input.GetKey(KeyCode.DownArrow) || Input.GetKey(KeyCode.LeftArrow) ||
-             Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.UpArrow)) && useMouseToMove)
-            MoveCameraWithMouse();
-        MoveCameraWithArrows();
+        MoveCamera();        
+        Zoom();
+    }
 
-        ResizeCameraWithScrollWheel();
+    void MoveCamera()
+    {
+        if (useMouseToMove && !(Input.GetKey(KeyCode.DownArrow) || Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.UpArrow)))
+        {
+            MoveCameraWithMouse();
+        }
+        MoveCameraWithArrows();
     }
 
     void MoveCameraWithMouse()
     {
         Vector3 mousePos = Input.mousePosition;
-        if (mousePos.x < pixelsBeforeBorder && mousePos.x > -pixelsBeyongBorder)
+        if (mousePos.x < pixelsBeforeBorder && mousePos.x > -pixelsBeyondBorder)
         {
             if (transform.position.x - cameraHalfWidth > mapLeftBorder)
                 cameraDirection.x = -1;
             else
                 cameraDirection.x = 0;
         }
-        else if (mousePos.x > Screen.width - pixelsBeforeBorder && mousePos.x < Screen.width + pixelsBeyongBorder)
+        else if (mousePos.x > Screen.width - pixelsBeforeBorder && mousePos.x < Screen.width + pixelsBeyondBorder)
         {
             if (transform.position.x + cameraHalfWidth < mapRightBorder)
                 cameraDirection.x = 1;
@@ -73,14 +81,14 @@ public class CameraController : MonoBehaviour
         {
             cameraDirection.x = 0;
         }
-        if (mousePos.y < pixelsBeforeBorder && mousePos.y > -pixelsBeyongBorder)
+        if (mousePos.y < pixelsBeforeBorder && mousePos.y > -pixelsBeyondBorder)
         {
             if (transform.position.y - cameraHalfHeight > mapBottomBorder)
                 cameraDirection.y = -1;
             else
                 cameraDirection.y = 0;
         }
-        else if (mousePos.y > Screen.height - pixelsBeforeBorder && mousePos.y < Screen.height + pixelsBeyongBorder)
+        else if (mousePos.y > Screen.height - pixelsBeforeBorder && mousePos.y < Screen.height + pixelsBeyondBorder)
         {
             if (transform.position.y + cameraHalfHeight < mapTopBorder)
                 cameraDirection.y = 1;
@@ -92,7 +100,7 @@ public class CameraController : MonoBehaviour
             cameraDirection.y = 0;
         }
         //cameraDirection.Normalize();
-        speedScale = cameraCurrentZoom / cameraMinZoom;
+        speedScale = currentCameraZoom / cameraZooms[0];
         transform.Translate(cameraDirection * cameraSpeed * speedScale * Time.deltaTime);
     }
 
@@ -135,39 +143,77 @@ public class CameraController : MonoBehaviour
             cameraDirection.y = 0;
         }
         //cameraDirection.Normalize();
-        speedScale = cameraCurrentZoom / cameraMinZoom;
+        speedScale = currentCameraZoom / cameraZooms[0];
         transform.Translate(cameraDirection * cameraSpeed * speedScale * Time.deltaTime);
     }
 
     public void ResetCameraBorders(int mapSizeX, int mapSizeY)
     {
         transform.position = new Vector3(0, 0, -10);
-        mapRightBorder = mapSizeX / 2 + extraBorder.x;
-        mapLeftBorder = -mapRightBorder;
-        mapTopBorder = mapSizeY / 2 + extraBorder.y;
-        mapBottomBorder = -mapTopBorder;
+        mapRightBorder = mapSizeX / 2 + extraBorder.y;
+        mapLeftBorder = -(mapSizeX / 2 + extraBorder.w);
+        mapTopBorder = mapSizeY / 2 + extraBorder.x;
+        mapBottomBorder = -(mapSizeY / 2 + extraBorder.z);
     }
 
     void UpdateCameraZoom()
     {
-        Camera.main.orthographicSize = cameraCurrentZoom;
+        Camera.main.orthographicSize = currentCameraZoom;
         cameraHalfHeight = Camera.main.orthographicSize;
         cameraHalfWidth = cameraHalfHeight * Screen.width / Screen.height;
     }
 
-    void ResizeCameraWithScrollWheel()
+    void GetZoomDirectionFromScrollWheel()
     {
-        if(Input.GetAxis("Mouse ScrollWheel") > 0 && cameraCurrentZoom > cameraMinZoom)
+        if (Input.GetAxis("Mouse ScrollWheel") > 0 && currentCameraZoomIndex > 0 && cameraZoomDirection == 0)            
         {
-            cameraCurrentZoom -= cameraZoomSpeed * Time.deltaTime;
-            cameraCurrentZoom = Mathf.Clamp(cameraCurrentZoom, cameraMinZoom, cameraMaxZoom);
-            UpdateCameraZoom();
+            cameraZoomDirection = +1;
         }
-        else if (Input.GetAxis("Mouse ScrollWheel") < 0 && cameraCurrentZoom < cameraMaxZoom)
+        else if(Input.GetAxis("Mouse ScrollWheel") < 0 && currentCameraZoomIndex < cameraZooms.Count && cameraZoomDirection == 0)
         {
-            cameraCurrentZoom += cameraZoomSpeed * Time.deltaTime;
-            cameraCurrentZoom = Mathf.Clamp(cameraCurrentZoom, cameraMinZoom, cameraMaxZoom);
-            UpdateCameraZoom();
+            cameraZoomDirection = -1;
         }
     }
+
+    void Zoom()
+    {
+        GetZoomDirectionFromScrollWheel();
+        float cameraMaxZoom = cameraZooms[currentCameraZoomIndex];
+        float cameraMinZoom = cameraZooms[currentCameraZoomIndex];
+        if (currentCameraZoomIndex > 0)
+        {
+            cameraMinZoom = cameraZooms[currentCameraZoomIndex - 1];
+        }
+        if (currentCameraZoomIndex < cameraZooms.Count - 1)
+        {
+            cameraMaxZoom = cameraZooms[currentCameraZoomIndex + 1];
+        }
+
+        if (cameraZoomDirection > 0 && currentCameraZoom > cameraMinZoom) //zoom in
+        {
+            currentCameraZoom -= cameraZoomSpeed * Time.deltaTime;
+            currentCameraZoom = Mathf.Clamp(currentCameraZoom, cameraMinZoom, cameraMaxZoom);
+            UpdateCameraZoom();
+        }        
+        else if (cameraZoomDirection < 0 && currentCameraZoom < cameraMaxZoom) //zoom out
+        {
+            currentCameraZoom += cameraZoomSpeed * Time.deltaTime;
+            currentCameraZoom = Mathf.Clamp(currentCameraZoom, cameraMinZoom, cameraMaxZoom);
+            UpdateCameraZoom();
+        }
+        else
+        {
+            if(cameraZoomDirection > 0 && currentCameraZoomIndex > 0)
+            {
+                currentCameraZoomIndex--;
+            }
+            if(cameraZoomDirection < 0 && currentCameraZoomIndex < cameraZooms.Count - 1)
+            {
+                currentCameraZoomIndex++;
+            }
+            cameraZoomDirection = 0;
+        }
+    }
+ 
 }
+
